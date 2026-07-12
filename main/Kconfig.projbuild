@@ -1,0 +1,79 @@
+menu "C3 Media Server Configuration"
+
+    menu "WiFi Access Point"
+
+        config AP_SSID
+            string "SoftAP SSID"
+            default "c3-media"
+            help
+                Name of the WiFi network the ESP32-C3 hosts. The Roku (and any
+                laptop used for testing) joins this network directly.
+
+        config AP_PASS
+            string "SoftAP password"
+            default "changeme123"
+            help
+                WPA2 password for the SoftAP. Must be at least 8 characters, or
+                leave empty for an open network.
+
+        config AP_CHANNEL
+            int "SoftAP channel"
+            default 6
+            range 1 13
+
+        config AP_MAX_CONN
+            int "Max simultaneous AP clients"
+            default 4
+            range 1 8
+
+    endmenu
+
+    menu "SD Card (SPI)"
+
+        config SD_PIN_MOSI
+            int "SD MOSI (DI) GPIO"
+            default 6
+
+        config SD_PIN_MISO
+            int "SD MISO (DO) GPIO"
+            default 5
+
+        config SD_PIN_CLK
+            int "SD CLK (SCK) GPIO"
+            default 4
+
+        config SD_PIN_CS
+            int "SD CS GPIO"
+            default 7
+
+        config SD_SPI_FREQ_KHZ
+            int "SD SPI clock (kHz)"
+            default 20000
+            range 400 40000
+            help
+                Higher is faster reads (better streaming headroom) but less
+                tolerant of long wiring. 20 MHz is a safe start; try 40 MHz on
+                short, clean connections.
+
+    endmenu
+
+    menu "DLNA / UPnP"
+
+        config DLNA_FRIENDLY_NAME
+            string "Friendly name shown to Roku"
+            default "C3 Media Server"
+
+        config DLNA_UUID
+            string "Device UUID (UDN)"
+            default "09349455-2941-4cf7-9847-0dd5ab210e97"
+            help
+                Stable UUID advertised in SSDP/USN and the device description.
+                Change it if you run more than one of these on a network.
+
+        config HTTP_PORT
+            int "HTTP server port"
+            default 80
+
+    endmenu
+
+endmenu

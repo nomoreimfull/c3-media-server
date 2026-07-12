@@ -1,0 +1,7 @@
+## Managed component dependencies (fetched by the IDF Component Manager on build).
+dependencies:
+  ## mDNS gives the box a friendly hostname on the AP (nice-to-have; DLNA discovery
+  ## itself uses SSDP, not mDNS).
+  espressif/mdns: "^1.2.0"
+  idf:
+    version: ">=5.2.0"

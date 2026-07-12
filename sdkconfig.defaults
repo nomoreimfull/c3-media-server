@@ -1,0 +1,33 @@
+# Default project configuration for the ESP32-C3 DLNA media server.
+# Override anything here via `idf.py menuconfig`.
+
+CONFIG_IDF_TARGET="esp32c3"
+
+# --- Partition table ---
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- CPU: run the single core flat out ---
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# --- HTTP server: room for streaming + DLNA + WebDAV handlers ---
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# --- FATFS: long filenames on the SD card ---
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# --- lwIP: a couple more sockets/PCBs for concurrent stream + SSDP ---
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# --- WiFi throughput: bigger TX/RX buffers help the ~15-20 Mbit/s ceiling ---
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
+
+# --- Main task stack (app_main does mount + server bring-up) ---
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
