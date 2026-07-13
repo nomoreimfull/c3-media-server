@@ -1,5 +1,7 @@
 #include "sdcard.h"
 
+#include <dirent.h>
+
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -63,5 +65,18 @@ esp_err_t sdcard_mount(void)
 
     sdmmc_card_print_info(stdout, s_card);
     ESP_LOGI(TAG, "SD card mounted at %s", SD_MOUNT_POINT);
+
+    /* Log the root directory so the exact filenames/case are visible for building
+     * /media?path=... URLs. */
+    DIR *d = opendir(SD_MOUNT_POINT);
+    if (d) {
+        ESP_LOGI(TAG, "--- %s contents ---", SD_MOUNT_POINT);
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            ESP_LOGI(TAG, "  %s%s", de->d_name, (de->d_type == DT_DIR) ? "/" : "");
+        }
+        ESP_LOGI(TAG, "--- end ---");
+        closedir(d);
+    }
     return ESP_OK;
 }

@@ -138,6 +138,7 @@ esp_err_t media_stream_handler(httpd_req_t *req)
     char rel_path[384];
     if (!content_dir_url_decode(enc_path, rel_path, sizeof(rel_path)) ||
         !content_dir_path_is_safe(rel_path)) {
+        ESP_LOGW(TAG, "400 bad path (raw='%s')", enc_path);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
@@ -150,6 +151,7 @@ esp_err_t media_stream_handler(httpd_req_t *req)
 
     struct stat st;
     if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ESP_LOGW(TAG, "404 '%s' (not found or not a regular file)", full_path);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
         return ESP_FAIL;
     }
