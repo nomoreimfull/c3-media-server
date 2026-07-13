@@ -2,6 +2,7 @@
 #include "content_dir.h"
 #include "dlna_didl.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -149,10 +150,17 @@ esp_err_t media_stream_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    return media_send_file(req, full_path, rel_path);
+}
+
+esp_err_t media_send_file(httpd_req_t *req, const char *full_path, const char *name_for_mime)
+{
     struct stat st;
     if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode)) {
         ESP_LOGW(TAG, "404 '%s' (not found or not a regular file)", full_path);
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "not found", HTTPD_RESP_USE_STRLEN);
         return ESP_FAIL;
     }
     long file_size = (long)st.st_size;
@@ -163,7 +171,7 @@ esp_err_t media_stream_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    const char *mime = content_dir_mime(rel_path);
+    const char *mime = content_dir_mime(name_for_mime);
     httpd_resp_set_type(req, mime);
     httpd_resp_set_hdr(req, "Accept-Ranges", "bytes");
     add_dlna_headers(req, mime);
@@ -194,7 +202,7 @@ esp_err_t media_stream_handler(httpd_req_t *req)
     }
 
     ESP_LOGI(TAG, "%s %s [%ld-%ld/%ld]", partial ? "206" : "200",
-             rel_path, start, end, file_size);
+             name_for_mime, start, end, file_size);
 
     esp_err_t ret = stream_window(req, f, start, end);
     fclose(f);

@@ -11,3 +11,10 @@
  * transferMode.dlna.org handshake headers.
  */
 esp_err_t media_stream_handler(httpd_req_t *req);
+
+/*
+ * Stream a file from its absolute VFS path with chunked transfer + HTTP Range
+ * support (206/Content-Range), setting Content-Type from name_for_mime's extension.
+ * Shared by the /media handler and WebDAV GET/HEAD. Sends its own error responses.
+ */
+esp_err_t media_send_file(httpd_req_t *req, const char *full_path, const char *name_for_mime);

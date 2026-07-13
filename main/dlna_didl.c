@@ -1,5 +1,6 @@
 #include "dlna_didl.h"
 #include "content_dir.h"
+#include "content_index.h"
 #include "sdcard.h"
 #include "sdkconfig.h"
 
@@ -222,40 +223,26 @@ static void emit_item(strbuf_t *sb, const char *object_id, const char *parent,
 }
 
 /* -------- directory reading -------- */
+/* Context threaded through content_index_iterate when building a Browse result. */
 typedef struct {
-    char *name;
-    bool is_dir;
-    long size;
-} entry_t;
+    strbuf_t *sb;
+    const char *server_base;
+    const char *base_dir;             /* "" for root, else the rel dir path */
+    const char *parent_of_children;   /* parentID attribute for the children */
+} didl_ctx_t;
 
-static int entry_cmp(const void *a, const void *b)
+static bool didl_child_cb(const content_index_entry_t *e, void *vctx)
 {
-    const entry_t *ea = a, *eb = b;
-    if (ea->is_dir != eb->is_dir) {
-        return ea->is_dir ? -1 : 1;   /* folders first */
+    didl_ctx_t *c = vctx;
+    char child_id[512];
+    snprintf(child_id, sizeof(child_id), "%s/%s", c->base_dir, e->name);
+    if (e->is_dir) {
+        emit_container(c->sb, child_id, c->parent_of_children, e->name, e->child_count);
+    } else {
+        emit_item(c->sb, child_id, c->parent_of_children, e->name, child_id,
+                  c->server_base, e->size);
     }
-    return strcasecmp(ea->name, eb->name);
-}
-
-/* Count children of a directory (folders + playable video), for childCount. */
-static int count_children(const char *full_dir)
-{
-    DIR *d = opendir(full_dir);
-    if (!d) {
-        return -1;
-    }
-    int n = 0;
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') {
-            continue;
-        }
-        if (de->d_type == DT_DIR || content_dir_is_video(de->d_name)) {
-            n++;
-        }
-    }
-    closedir(d);
-    return n;
+    return true;
 }
 
 char *dlna_didl_children(const char *dir_rel_path, const char *server_base,
@@ -264,66 +251,6 @@ char *dlna_didl_children(const char *dir_rel_path, const char *server_base,
 {
     *number_returned = 0;
     *total_matches = 0;
-
-    char full_dir[512];
-    if (!content_dir_full_path(dir_rel_path, full_dir, sizeof(full_dir))) {
-        return NULL;
-    }
-    DIR *d = opendir(full_dir);
-    if (!d) {
-        ESP_LOGW(TAG, "opendir(%s) failed", full_dir);
-        return NULL;
-    }
-
-    /* Collect folders + playable files. */
-    size_t cap = 32, n = 0;
-    entry_t *entries = malloc(cap * sizeof(entry_t));
-    if (!entries) {
-        closedir(d);
-        return NULL;
-    }
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') {
-            continue;
-        }
-        bool is_dir = (de->d_type == DT_DIR);
-        if (!is_dir && de->d_type == DT_UNKNOWN) {
-            /* Some FAT setups report UNKNOWN; stat to disambiguate. */
-            char fp[512];
-            snprintf(fp, sizeof(fp), "%s/%s", full_dir, de->d_name);
-            struct stat st;
-            if (stat(fp, &st) == 0) {
-                is_dir = S_ISDIR(st.st_mode);
-            }
-        }
-        if (!is_dir && !content_dir_is_video(de->d_name)) {
-            continue;
-        }
-        if (n == cap) {
-            cap *= 2;
-            entry_t *ne = realloc(entries, cap * sizeof(entry_t));
-            if (!ne) {
-                break;
-            }
-            entries = ne;
-        }
-        entries[n].name = strdup(de->d_name);
-        entries[n].is_dir = is_dir;
-        entries[n].size = -1;
-        n++;
-    }
-    closedir(d);
-
-    qsort(entries, n, sizeof(entry_t), entry_cmp);
-    *total_matches = (int)n;
-
-    if (requested_count <= 0) {
-        requested_count = (int)n;   /* 0 == all remaining */
-    }
-
-    strbuf_t sb = {0};
-    sb_puts(&sb, DIDL_HEADER);
 
     char base_dir[384];
     /* Normalise the container prefix so child IDs are "/dir/child" (root -> "/child"). */
@@ -335,44 +262,22 @@ char *dlna_didl_children(const char *dir_rel_path, const char *server_base,
     const char *parent_of_children = (dir_rel_path[0] == '\0' || strcmp(dir_rel_path, "/") == 0)
                                          ? "0" : dir_rel_path;
 
-    int emitted = 0;
-    for (int i = starting_index; i < (int)n && emitted < requested_count; i++) {
-        char child_id[512];
-        snprintf(child_id, sizeof(child_id), "%s/%s", base_dir, entries[i].name);
+    strbuf_t sb = {0};
+    sb_puts(&sb, DIDL_HEADER);
 
-        if (entries[i].is_dir) {
-            char child_full[512];
-            content_dir_full_path(child_id, child_full, sizeof(child_full));
-            emit_container(&sb, child_id, parent_of_children, entries[i].name,
-                           count_children(child_full));
-        } else {
-            char child_full[512];
-            long size = -1;
-            if (content_dir_full_path(child_id, child_full, sizeof(child_full))) {
-                struct stat st;
-                if (stat(child_full, &st) == 0) {
-                    size = (long)st.st_size;
-                }
-            }
-            emit_item(&sb, child_id, parent_of_children, entries[i].name,
-                      child_id, server_base, size);
-        }
-        emitted++;
+    didl_ctx_t ctx = { &sb, server_base, base_dir, parent_of_children };
+    if (!content_index_iterate(dir_rel_path, starting_index, requested_count,
+                               didl_child_cb, &ctx, number_returned, total_matches)) {
+        free(sb.buf);
+        return NULL;
     }
 
     sb_puts(&sb, DIDL_FOOTER);
-    *number_returned = emitted;
-
-    for (size_t i = 0; i < n; i++) {
-        free(entries[i].name);
-    }
-    free(entries);
-
     if (sb.err) {
         free(sb.buf);
         return NULL;
     }
-    return sb.buf;
+    return sb.buf ? sb.buf : strdup("");
 }
 
 char *dlna_didl_metadata(const char *rel_path, const char *server_base)
@@ -384,9 +289,7 @@ char *dlna_didl_metadata(const char *rel_path, const char *server_base)
     sb_puts(&sb, DIDL_HEADER);
 
     if (strcmp(rel_path, "/") == 0) {
-        char full[512];
-        content_dir_full_path(rel_path, full, sizeof(full));
-        emit_container(&sb, "0", "-1", CONFIG_DLNA_FRIENDLY_NAME, count_children(full));
+        emit_container(&sb, "0", "-1", CONFIG_DLNA_FRIENDLY_NAME, content_index_count("/"));
     } else {
         char full[512];
         if (!content_dir_full_path(rel_path, full, sizeof(full))) {
@@ -400,7 +303,7 @@ char *dlna_didl_metadata(const char *rel_path, const char *server_base)
         }
         const char *title = base_name(rel_path);
         if (S_ISDIR(st.st_mode)) {
-            emit_container(&sb, rel_path, parent, title, count_children(full));
+            emit_container(&sb, rel_path, parent, title, content_index_count(rel_path));
         } else {
             emit_item(&sb, rel_path, parent, title, rel_path, server_base,
                       (long)st.st_size);

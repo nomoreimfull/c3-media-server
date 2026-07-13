@@ -50,13 +50,38 @@ Key `menuconfig` items under **C3 Media Server Configuration**:
   try 40 MHz on short/clean wiring for more headroom).
 - **DLNA / UPnP**: friendly name shown to Roku, a stable device UUID.
 
-## Load media (manual for now)
+## Load media
 
-Put your H.264 files on the SD card from a computer (FAT32), optionally in folders — the
-server browses the directory tree. Then insert the card and power the C3.
+Two ways to get files onto the card:
 
-> WebDAV upload over the network is planned but not yet implemented; load the card by hand
-> until then.
+- **Pull the card:** copy H.264 files on from a computer (FAT32), optionally in folders — the
+  server browses the tree. Then insert the card and power the C3.
+- **Over WiFi via WebDAV** (see below) — add/delete/rename files on the running box, no card
+  removal.
+
+## WebDAV (manage files over WiFi)
+
+A read-write WebDAV share is exposed at **`http://192.168.4.1/dav`** (no login). Join the C3's
+AP, then map it:
+
+- **Android:** Solid Explorer / CX File Explorer / Material Files → add a WebDAV/network
+  location → host `192.168.4.1`, path `/dav`, port `80`, no username/password.
+- **macOS:** Finder → *Go → Connect to Server* → `http://192.168.4.1/dav`.
+- **Browser:** open `http://192.168.4.1/dav/` for a plain clickable listing.
+
+You can upload, download, make folders, delete, and rename. Uploads show up in DLNA browsing
+immediately (the folder's index is refreshed on write).
+
+> Windows *Map network drive* is not yet supported (it needs WebDAV class-2 `LOCK`, a later
+> addition). Use a phone app or Finder for now.
+
+### File index
+
+To avoid re-scanning the SD on every browse, the first listing of a folder writes a small
+`index.xml` under **`/sdcard/.info/`** (mirroring the tree) and later listings read that.
+It's rebuilt automatically when you change a folder over WebDAV. If you edit the card
+**externally** (pull it and change files on a computer), delete `/sdcard/.info` to force a
+fresh index. The `.info` folder is hidden from both DLNA and WebDAV listings.
 
 ## Use it from Roku
 
@@ -84,8 +109,10 @@ Since the device can't transcode, match your source files to this budget ahead o
 
 ## Roadmap
 
-- **WebDAV** on the same HTTP server (`PROPFIND`/`PUT`/`DELETE`/...) so you can manage the
-  SD card over the network instead of pulling the card.
+- **Windows WebDAV write** — advertise `DAV: 1, 2` and fake `LOCK`/`UNLOCK` so Windows
+  *Map network drive* can upload.
+- **Bigger stream buffers** — the index lives on the SD, not RAM, so freed heap can grow the
+  `media_stream` read buffer for smoother playback.
 
 ## Layout
 
@@ -95,8 +122,10 @@ main/
   wifi_ap.c         SoftAP + DHCP
   sdcard.c          SDSPI FATFS mount
   http_server.c     shared esp_http_server + route registration
-  media_stream.c    GET /media with HTTP Range
+  media_stream.c    GET /media with HTTP Range (media_send_file shared with WebDAV)
   content_dir.c     path/MIME/objectID helpers
+  content_index.c   lazy per-folder SD index (.info/*/index.xml)
+  webdav.c          read-write WebDAV at /dav
   dlna_ssdp.c       SSDP discovery responder + announcer
   dlna_upnp.c       device/SCPD XML + SOAP Browse
   dlna_didl.c       DIDL-Lite generation + DLNA.ORG flags

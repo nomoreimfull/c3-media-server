@@ -6,9 +6,11 @@ idf_component_register(
         "http_server.c"
         "media_stream.c"
         "content_dir.c"
+        "content_index.c"
         "dlna_ssdp.c"
         "dlna_upnp.c"
         "dlna_didl.c"
+        "webdav.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
