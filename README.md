@@ -36,7 +36,7 @@ SD breakout, and keep the wiring short if you raise the SPI clock.
 
 ## Build & flash
 
-Requires **ESP-IDF ≥ 5.2**. In VS Code use the Espressif IDF extension, or on the CLI:
+Requires **ESP-IDF ≥ 5.1**. In VS Code use the Espressif IDF extension, or on the CLI:
 
 ```bash
 idf.py set-target esp32c3
