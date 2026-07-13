@@ -52,6 +52,9 @@ esp_err_t wifi_ap_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    /* Keep the radio fully awake — this is a streaming server, not a sensor. */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     char ip[16] = {0};
     wifi_ap_get_ip(ip, sizeof(ip));
     ESP_LOGI(TAG, "SoftAP up: SSID='%s' channel=%d ip=%s auth=%s",
