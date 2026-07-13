@@ -23,3 +23,8 @@ idf_component_register(
         mdns
         lwip
 )
+
+# Path-building snprintf() calls intentionally accept truncation for pathologically
+# deep paths (never an overflow). Keep the warning but don't fail the build on it.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=format-truncation)
+
