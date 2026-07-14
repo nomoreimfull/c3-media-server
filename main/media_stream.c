@@ -64,54 +64,19 @@ static bool parse_range(const char *hdr, long file_size, long *start, long *end)
     return true;
 }
 
-/* Stream bytes [start,end] inclusive from f using chunked transfer. */
-static esp_err_t stream_window(httpd_req_t *req, FILE *f, long start, long end)
+/* Send exactly len bytes over the request's raw socket, retrying partial writes.
+ * Returns false on close/timeout/error (the configured send_wait_timeout applies). */
+static bool sock_send_all(httpd_req_t *req, int sockfd, const char *buf, size_t len)
 {
-    if (fseek(f, start, SEEK_SET) != 0) {
-        ESP_LOGE(TAG, "fseek to %ld failed", start);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "seek failed");
-        return ESP_FAIL;
-    }
-
-    char *buf = malloc(SCRATCH_SIZE);
-    if (!buf) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
-        return ESP_FAIL;
-    }
-
-    long remaining = end - start + 1;
-    esp_err_t ret = ESP_OK;
-    while (remaining > 0) {
-        size_t want = remaining < SCRATCH_SIZE ? (size_t)remaining : SCRATCH_SIZE;
-        size_t got = fread(buf, 1, want, f);
-        if (got == 0) {
-            break;   /* EOF or read error */
+    size_t sent = 0;
+    while (sent < len) {
+        int r = httpd_socket_send(req->handle, sockfd, buf + sent, len - sent, 0);
+        if (r <= 0) {
+            return false;
         }
-        if (httpd_resp_send_chunk(req, buf, got) != ESP_OK) {
-            /* Client hung up (Roku stopped/seeked). Abort quietly so the socket frees. */
-            ESP_LOGD(TAG, "client disconnected mid-stream");
-            ret = ESP_FAIL;
-            break;
-        }
-        remaining -= got;
+        sent += (size_t)r;
     }
-
-    free(buf);
-    if (ret == ESP_OK) {
-        httpd_resp_send_chunk(req, NULL, 0);   /* terminate chunked response */
-    }
-    return ret;
-}
-
-/* If the client asked for DLNA content features, echo the matching headers. */
-static void add_dlna_headers(httpd_req_t *req, const char *mime)
-{
-    char val[8];
-    if (httpd_req_get_hdr_value_str(req, "getcontentFeatures.dlna.org", val, sizeof(val)) == ESP_OK) {
-        httpd_resp_set_hdr(req, "contentFeatures.dlna.org", dlna_content_features(mime));
-    }
-    /* Streaming (not interactive/background) transfer for A/V. */
-    httpd_resp_set_hdr(req, "transferMode.dlna.org", "Streaming");
+    return true;
 }
 
 esp_err_t media_stream_handler(httpd_req_t *req)
@@ -165,17 +130,7 @@ esp_err_t media_send_file(httpd_req_t *req, const char *full_path, const char *n
     }
     long file_size = (long)st.st_size;
 
-    FILE *f = fopen(full_path, "rb");
-    if (!f) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "open failed");
-        return ESP_FAIL;
-    }
-
-    const char *mime = content_dir_mime(name_for_mime);
-    httpd_resp_set_type(req, mime);
-    httpd_resp_set_hdr(req, "Accept-Ranges", "bytes");
-    add_dlna_headers(req, mime);
-
+    /* --- parse Range (before opening the file, so 416 is cheap) --- */
     long start = 0, end = file_size - 1;
     char range_hdr[64];
     bool partial = false;
@@ -183,28 +138,97 @@ esp_err_t media_send_file(httpd_req_t *req, const char *full_path, const char *n
         if (parse_range(range_hdr, file_size, &start, &end)) {
             partial = true;
         } else {
-            /* Unsatisfiable range. */
             char cr[48];
             snprintf(cr, sizeof(cr), "bytes */%ld", file_size);
             httpd_resp_set_hdr(req, "Content-Range", cr);
             httpd_resp_set_status(req, "416 Range Not Satisfiable");
             httpd_resp_send(req, NULL, 0);
-            fclose(f);
             return ESP_OK;
         }
     }
 
-    if (partial) {
-        char cr[64];
-        snprintf(cr, sizeof(cr), "bytes %ld-%ld/%ld", start, end, file_size);
-        httpd_resp_set_hdr(req, "Content-Range", cr);
-        httpd_resp_set_status(req, "206 Partial Content");
+    FILE *f = fopen(full_path, "rb");
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "open failed");
+        return ESP_FAIL;
+    }
+    if (fseek(f, start, SEEK_SET) != 0) {
+        fclose(f);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "seek failed");
+        return ESP_FAIL;
     }
 
+    const char *mime = content_dir_mime(name_for_mime);
+    long clen = end - start + 1;
+
+    /* Optional DLNA response headers. */
+    char cf_line[128] = "";
+    char cf_val[8];
+    if (httpd_req_get_hdr_value_str(req, "getcontentFeatures.dlna.org",
+                                    cf_val, sizeof(cf_val)) == ESP_OK) {
+        snprintf(cf_line, sizeof(cf_line), "contentFeatures.dlna.org: %s\r\n",
+                 dlna_content_features(mime));
+    }
+    char cr_line[64] = "";
+    if (partial) {
+        snprintf(cr_line, sizeof(cr_line), "Content-Range: bytes %ld-%ld/%ld\r\n",
+                 start, end, file_size);
+    }
+
+    /* Build the response header block ourselves and send it over the raw socket —
+     * esp_http_server only offers chunked transfer for streaming, but a real
+     * Content-Length gives DLNA players cleaner seeking. */
+    char hdr[512];
+    int hlen = snprintf(hdr, sizeof(hdr),
+        "HTTP/1.1 %s\r\n"
+        "Content-Type: %s\r\n"
+        "Accept-Ranges: bytes\r\n"
+        "Content-Length: %ld\r\n"
+        "%s"                                   /* Content-Range (partial only) */
+        "transferMode.dlna.org: Streaming\r\n"
+        "%s"                                   /* contentFeatures (if requested) */
+        "Connection: close\r\n"
+        "\r\n",
+        partial ? "206 Partial Content" : "200 OK",
+        mime, clen, cr_line, cf_line);
+
+    if (hlen < 0 || hlen >= (int)sizeof(hdr)) {
+        /* Header didn't fit — nothing raw-sent yet, so a normal error is fine. */
+        fclose(f);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "header too long");
+        return ESP_FAIL;
+    }
+
+    int sockfd = httpd_req_to_sockfd(req);
     ESP_LOGI(TAG, "%s %s [%ld-%ld/%ld]", partial ? "206" : "200",
              name_for_mime, start, end, file_size);
 
-    esp_err_t ret = stream_window(req, f, start, end);
+    /* From the first raw byte on we own the socket: return ESP_OK on both success
+     * and mid-stream abort (httpd emits nothing further; client sees Connection:close). */
+    if (sockfd < 0 || !sock_send_all(req, sockfd, hdr, (size_t)hlen)) {
+        fclose(f);
+        return ESP_OK;
+    }
+
+    char *buf = malloc(SCRATCH_SIZE);
+    if (!buf) {
+        fclose(f);
+        return ESP_OK;
+    }
+    long remaining = clen;
+    while (remaining > 0) {
+        size_t want = remaining < SCRATCH_SIZE ? (size_t)remaining : SCRATCH_SIZE;
+        size_t got = fread(buf, 1, want, f);
+        if (got == 0) {
+            break;   /* EOF or read error */
+        }
+        if (!sock_send_all(req, sockfd, buf, got)) {
+            ESP_LOGD(TAG, "client disconnected mid-stream");
+            break;
+        }
+        remaining -= got;
+    }
+    free(buf);
     fclose(f);
-    return ret;
+    return ESP_OK;
 }
