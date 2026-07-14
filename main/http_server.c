@@ -16,7 +16,7 @@ httpd_handle_t http_server_start(void)
     config.max_uri_handlers = 20;         /* /media + 5 UPnP + 8 WebDAV + headroom */
     config.stack_size = 8192;
     config.recv_wait_timeout = 15;
-    config.send_wait_timeout = 15;
+    config.send_wait_timeout = 30;   /* survive the player pausing after it buffers */
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     httpd_handle_t server = NULL;

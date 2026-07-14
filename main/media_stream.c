@@ -14,7 +14,7 @@ static const char *TAG = "media";
 
 /* Read window size. Bigger reads help SDSPI throughput; kept modest for the
  * C3's small heap. Allocated per request (the httpd task serves one at a time). */
-#define SCRATCH_SIZE (8 * 1024)
+#define SCRATCH_SIZE (32 * 1024)
 
 /*
  * Parse an HTTP Range header value ("bytes=start-end", "bytes=start-",
