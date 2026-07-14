@@ -14,7 +14,7 @@ httpd_handle_t http_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = CONFIG_HTTP_PORT;
     config.lru_purge_enable = true;       /* reclaim the oldest socket under pressure */
-    config.max_uri_handlers = 24;         /* /media /tx + 5 UPnP + 8 WebDAV + 3 web UI */
+    config.max_uri_handlers = 24;         /* /media /tx + 5 UPnP + 10 WebDAV + 5 web UI */
     config.stack_size = 8192;
     config.recv_wait_timeout = 15;
     config.send_wait_timeout = 30;   /* survive the player pausing after it buffers */

@@ -3,6 +3,7 @@
 #include "content_dir.h"
 #include "content_index.h"
 #include "sdcard.h"
+#include "auth.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -352,6 +353,10 @@ static bool propfind_child_cb(const content_index_entry_t *e, void *vctx)
 
 static esp_err_t dav_propfind(httpd_req_t *req)
 {
+    if (!auth_ok(req)) {
+        drain_body(req);
+        return auth_challenge(req);
+    }
     char rel[400];
     if (!uri_to_rel(req->uri, rel, sizeof(rel))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
@@ -399,9 +404,13 @@ static esp_err_t dav_propfind(httpd_req_t *req)
 
 static esp_err_t dav_options(httpd_req_t *req)
 {
-    httpd_resp_set_hdr(req, "DAV", "1");
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
+    /* Advertise class 2 (LOCK/UNLOCK) so Windows "Map network drive" allows writes. */
+    httpd_resp_set_hdr(req, "DAV", "1, 2");
     httpd_resp_set_hdr(req, "Allow",
-        "OPTIONS, GET, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY");
+        "OPTIONS, GET, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY, LOCK, UNLOCK");
     httpd_resp_set_hdr(req, "MS-Author-Via", "DAV");
     httpd_resp_set_status(req, "200 OK");
     return httpd_resp_send(req, NULL, 0);
@@ -430,6 +439,9 @@ static bool html_child_cb(const content_index_entry_t *e, void *vctx)
 
 static esp_err_t dav_get(httpd_req_t *req)
 {
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
     char rel[400];
     if (!uri_to_rel(req->uri, rel, sizeof(rel))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
@@ -467,17 +479,38 @@ static esp_err_t dav_get(httpd_req_t *req)
 
 /* ----------------------------------------------------------------- PUT */
 
+/* Build the hidden temp path "<dir>/.<name>.part" for the final path `full`. */
+static void put_temp_path(const char *full, char *tmp, size_t n)
+{
+    const char *slash = strrchr(full, '/');
+    if (!slash) {
+        snprintf(tmp, n, ".%s.part", full);
+        return;
+    }
+    size_t dir_len = (size_t)(slash - full);   /* excludes the slash */
+    snprintf(tmp, n, "%.*s/.%s.part", (int)dir_len, full, slash + 1);
+}
+
 static esp_err_t dav_put(httpd_req_t *req)
 {
+    if (!auth_ok(req)) {
+        drain_body(req);
+        return auth_challenge(req);
+    }
     char rel[400];
-    if (!uri_to_rel(req->uri, rel, sizeof(rel))) {
+    if (!uri_to_rel(req->uri, rel, sizeof(rel)) || strcmp(rel, "/") == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
 
-    FILE *f = fopen(full, "wb");
+    /* Write to a hidden temp file, then rename on full success — so a failed or
+     * cancelled upload never leaves a partial file at the real name. */
+    char tmp[600];
+    put_temp_path(full, tmp, sizeof(tmp));
+
+    FILE *f = fopen(tmp, "wb");
     if (!f) {
         httpd_resp_set_status(req, "409 Conflict");   /* parent missing? */
         httpd_resp_send(req, NULL, 0);
@@ -486,6 +519,7 @@ static esp_err_t dav_put(httpd_req_t *req)
     char *buf = malloc(IO_BUF);
     if (!buf) {
         fclose(f);
+        unlink(tmp);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
         return ESP_FAIL;
     }
@@ -499,23 +533,35 @@ static esp_err_t dav_put(httpd_req_t *req)
             break;
         }
         if (fwrite(buf, 1, r, f) != (size_t)r) {
-            ok = false;
+            ok = false;   /* SD full / write error */
             break;
         }
         remaining -= r;
     }
     free(buf);
-    fclose(f);
+    /* Flush to the card before we decide success — a failed close is a failed write. */
+    if (fflush(f) != 0 || fclose(f) != 0) {
+        ok = false;
+    }
+
+    if (!ok) {
+        unlink(tmp);   /* no partial file survives */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
+        return ESP_FAIL;
+    }
+
+    /* Commit: replace any existing file atomically-ish (unlink + rename on FATFS). */
+    unlink(full);
+    if (rename(tmp, full) != 0) {
+        unlink(tmp);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "rename failed");
+        return ESP_FAIL;
+    }
 
     char parent[400];
     rel_parent(rel, parent, sizeof(parent));
     content_index_invalidate(parent);
 
-    if (!ok) {
-        unlink(full);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
-        return ESP_FAIL;
-    }
     ESP_LOGI(TAG, "PUT %s (%d bytes)", rel, req->content_len);
     httpd_resp_set_status(req, "201 Created");
     return httpd_resp_send(req, NULL, 0);
@@ -525,6 +571,9 @@ static esp_err_t dav_put(httpd_req_t *req)
 
 static esp_err_t dav_delete(httpd_req_t *req)
 {
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
     char rel[400];
     if (!uri_to_rel(req->uri, rel, sizeof(rel)) || strcmp(rel, "/") == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
@@ -548,6 +597,9 @@ static esp_err_t dav_delete(httpd_req_t *req)
 
 static esp_err_t dav_mkcol(httpd_req_t *req)
 {
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
     char rel[400];
     if (!uri_to_rel(req->uri, rel, sizeof(rel)) || strcmp(rel, "/") == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
@@ -572,6 +624,9 @@ static esp_err_t dav_mkcol(httpd_req_t *req)
 
 static esp_err_t move_or_copy(httpd_req_t *req, bool is_move)
 {
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
     char src[400], dst[400];
     if (!uri_to_rel(req->uri, src, sizeof(src)) || strcmp(src, "/") == 0 ||
         !dest_to_rel(req, dst, sizeof(dst)) || strcmp(dst, "/") == 0) {
@@ -612,6 +667,61 @@ static esp_err_t move_or_copy(httpd_req_t *req, bool is_move)
 static esp_err_t dav_move(httpd_req_t *req) { return move_or_copy(req, true); }
 static esp_err_t dav_copy(httpd_req_t *req) { return move_or_copy(req, false); }
 
+/* ------------------------------------------------------------ LOCK / UNLOCK */
+
+/* We don't implement real locking (single-worker httpd = one request at a time),
+ * but Windows "Map network drive" refuses to write unless the server claims
+ * class-2 lock support. Hand back a well-formed lock so writes are allowed. */
+#define FAKE_LOCK_TOKEN "opaquelocktoken:c3-media-0000-0000-0000-000000000001"
+
+static esp_err_t dav_lock(httpd_req_t *req)
+{
+    if (!auth_ok(req)) {
+        drain_body(req);
+        return auth_challenge(req);
+    }
+    char rel[400];
+    if (!uri_to_rel(req->uri, rel, sizeof(rel))) {
+        drain_body(req);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
+        return ESP_FAIL;
+    }
+    drain_body(req);   /* ignore the requested lock scope/owner */
+
+    db_t db = {0};
+    db_puts(&db, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                 "<D:prop xmlns:D=\"DAV:\"><D:lockdiscovery><D:activelock>"
+                 "<D:locktype><D:write/></D:locktype>"
+                 "<D:lockscope><D:exclusive/></D:lockscope>"
+                 "<D:depth>infinity</D:depth>"
+                 "<D:timeout>Second-3600</D:timeout>"
+                 "<D:locktoken><D:href>" FAKE_LOCK_TOKEN "</D:href></D:locktoken>"
+                 "<D:lockroot><D:href>" DAV_PREFIX);
+    db_urlenc(&db, rel);
+    db_puts(&db, "</D:href></D:lockroot>"
+                 "</D:activelock></D:lockdiscovery></D:prop>");
+    if (db.err) {
+        free(db.buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/xml; charset=\"utf-8\"");
+    httpd_resp_set_hdr(req, "Lock-Token", "<" FAKE_LOCK_TOKEN ">");
+    httpd_resp_set_status(req, "200 OK");
+    esp_err_t r = httpd_resp_send(req, db.buf, db.len);
+    free(db.buf);
+    return r;
+}
+
+static esp_err_t dav_unlock(httpd_req_t *req)
+{
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 /* -------------------------------------------------------------- register */
 
 esp_err_t webdav_register(httpd_handle_t server)
@@ -628,6 +738,8 @@ esp_err_t webdav_register(httpd_handle_t server)
         { HTTP_MKCOL,    dav_mkcol },
         { HTTP_MOVE,     dav_move },
         { HTTP_COPY,     dav_copy },
+        { HTTP_LOCK,     dav_lock },
+        { HTTP_UNLOCK,   dav_unlock },
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_uri_t u = {
@@ -642,6 +754,6 @@ esp_err_t webdav_register(httpd_handle_t server)
             return err;
         }
     }
-    ESP_LOGI(TAG, "WebDAV mounted at %s (read-write, class 1)", DAV_PREFIX);
+    ESP_LOGI(TAG, "WebDAV mounted at %s (read-write, class 2)", DAV_PREFIX);
     return ESP_OK;
 }

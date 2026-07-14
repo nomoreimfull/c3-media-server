@@ -15,6 +15,7 @@
 #include "http_server.h"
 #include "dlna_ssdp.h"
 #include "content_index.h"
+#include "config.h"
 
 static const char *TAG = "app";
 
@@ -42,6 +43,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    /* Runtime config (WiFi + WebDAV creds) in NVS, editable from /settings. Must
+     * precede wifi_start so it picks up any saved AP/STA credentials. */
+    ESP_ERROR_CHECK(config_init());
 
     /* These two tags warn on every normal streaming abort — a media player that
      * buffered enough and stopped reading trips "send error 11/104" +

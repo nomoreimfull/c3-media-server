@@ -102,21 +102,63 @@ starts immediately. (DLNA is still available — see below — it's just slower 
 Note: browsers play **H.264 MP4/MOV/WebM** natively; **MKV/AVI won't play in-browser** (use
 MP4, or DLNA/VLC for those). Keep bitrate under your link speed (~2 Mbit/s) for smooth play.
 
+## Settings page (edit WiFi + WebDAV login in the browser)
+
+Open **`http://<ip>/settings`** (linked from the gear on the home page) to edit, without a
+rebuild:
+
+- **Access-point** name + password + channel (the fallback network the box hosts),
+- **Home WiFi** name + password (station mode — join your router if reachable),
+- **WebDAV / settings username + password** (the login below).
+
+Values are stored in NVS and survive reboots (first boot uses the `menuconfig` defaults).
+**Saving reboots the device** to apply the WiFi changes — if you changed the AP name/password,
+reconnect to the new network afterwards. A bad home-WiFi password just falls back to hosting
+the AP, so you can't lock yourself out of the radio.
+
+**The login:** leave the **WebDAV password blank to disable authentication** (the default —
+handy on first setup). Once you set a password, both **`/settings`** and **`/dav`** prompt for
+the username/password; the media browser (`/`) and direct `/media` streaming stay open so
+playback needs no login.
+
 ## WebDAV (manage files over WiFi)
 
-A read-write WebDAV share is exposed at **`http://192.168.4.1/dav`** (no login). Join the C3's
-AP, then map it:
+A read-write WebDAV share is exposed at **`http://<ip>/dav`**. If you set a WebDAV
+username/password on the settings page, use it when connecting; otherwise leave credentials
+blank. Join the C3's AP (or your home WiFi in station mode), then map it:
 
 - **Android:** Solid Explorer / CX File Explorer / Material Files → add a WebDAV/network
-  location → host `192.168.4.1`, path `/dav`, port `80`, no username/password.
-- **macOS:** Finder → *Go → Connect to Server* → `http://192.168.4.1/dav`.
-- **Browser:** open `http://192.168.4.1/dav/` for a plain clickable listing.
+  location → host `<ip>`, path `/dav`, port `80`, credentials as set (or none).
+- **macOS:** Finder → *Go → Connect to Server* → `http://<ip>/dav`.
+- **Windows:** *Map network drive* — see below (needs one registry tweak).
+- **Browser:** open `http://<ip>/dav/` for a plain clickable listing.
 
 You can upload, download, make folders, delete, and rename. Uploads show up in DLNA browsing
-immediately (the folder's index is refreshed on write).
+immediately (the folder's index is refreshed on write). Uploads are written to a hidden
+`.<name>.part` temp file and renamed into place only on full success, so a cancelled or failed
+transfer **never leaves a partial file** on the card.
 
-> Windows *Map network drive* is not yet supported (it needs WebDAV class-2 `LOCK`, a later
-> addition). Use a phone app or Finder for now.
+> While a WebDAV transfer is in progress the box can't serve a DLNA/stream request at the same
+> time — the single HTTP worker handles one request at a time. Uploads and playback don't
+> overlap; this is expected.
+
+### Windows *Map network drive*
+
+Windows only maps a WebDAV share once it sees class-2 lock support (which the server now
+advertises) and, for plain HTTP, once Basic auth over HTTP is enabled:
+
+1. Enable Basic-over-HTTP: in `regedit` set
+   `HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel` to **`2`**.
+   (Windows disables Basic auth on non-HTTPS by default.)
+2. Optionally raise the download size cap `FileSizeLimitInBytes` (same key) from the ~50 MB
+   default to e.g. `0xffffffff` if you'll pull large files.
+3. Restart the **WebClient** service (`services.msc`, or `net stop webclient && net start
+   webclient`) so the changes take effect.
+4. *This PC → Map network drive* → Folder `http://<ip>/dav` → tick *Connect using different
+   credentials* if you set a WebDAV login, and enter it.
+
+Set a WebDAV username/password on the settings page first — Windows won't send a blank
+credential over Basic. A phone app (Solid Explorer) or macOS Finder needs none of this.
 
 ### File index
 
@@ -166,23 +208,25 @@ Since the device can't transcode, match your source files to this budget ahead o
 
 ## Roadmap
 
-- **Windows WebDAV write** — advertise `DAV: 1, 2` and fake `LOCK`/`UNLOCK` so Windows
-  *Map network drive* can upload.
 - **Bigger stream buffers** — the index lives on the SD, not RAM, so freed heap can grow the
   `media_stream` read buffer for smoother playback.
+- **exFAT cards** — deferred; the IDF 5.1 image is built for FAT32.
 
 ## Layout
 
 ```
 main/
-  app_main.c        boot: nvs -> wifi -> sdcard -> mdns -> http -> ssdp
-  wifi.c            station-with-AP-fallback bring-up
+  app_main.c        boot: nvs -> config -> wifi -> sdcard -> mdns -> http -> ssdp
+  config.c          runtime WiFi + WebDAV settings in NVS (namespace "cfg")
+  auth.c            HTTP Basic auth for /settings + /dav (blank pass = disabled)
+  wifi.c            station-with-AP-fallback bring-up (creds from config)
   sdcard.c          SDSPI FATFS mount
   http_server.c     shared esp_http_server + route registration
   media_stream.c    GET /media with HTTP Range (media_send_file shared with WebDAV)
   content_dir.c     path/MIME/objectID helpers
   content_index.c   lazy per-folder SD index (.info/*/index.xml)
-  webdav.c          read-write WebDAV at /dav
+  webdav.c          read-write WebDAV at /dav (class 2, safe PUT)
+  webui.c           web media browser/player + /settings page
   dlna_ssdp.c       SSDP discovery responder + announcer
   dlna_upnp.c       device/SCPD XML + SOAP Browse
   dlna_didl.c       DIDL-Lite generation + DLNA.ORG flags

@@ -1,12 +1,17 @@
 #include "webui.h"
 #include "content_dir.h"
 #include "content_index.h"
+#include "config.h"
+#include "auth.h"
 
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_system.h"
 #include "esp_log.h"
 
 static const char *TAG = "webui";
@@ -184,6 +189,9 @@ static esp_err_t render_browse(httpd_req_t *req, const char *dir)
     sb_puts(&sb, "<h1>");
     sb_esc(&sb, dir);
     sb_puts(&sb, "</h1>");
+    if (strcmp(dir, "/") == 0) {
+        sb_puts(&sb, "<a class=up href=\"/settings\">\xE2\x9A\x99 settings</a>");  /* ⚙ */
+    }
 
     if (strcmp(dir, "/") != 0) {
         char up[400];
@@ -268,14 +276,162 @@ static esp_err_t ui_play(httpd_req_t *req)
     return r;
 }
 
+/* ---------------------------------------------------------- settings page */
+
+/* One editable field: config key + form label + whether to mask it as a password. */
+typedef struct {
+    const char *key;
+    const char *label;
+    bool secret;
+} field_t;
+
+static const field_t SETTINGS_FIELDS[] = {
+    { "ap_ssid",  "Access-point name (SSID)",     false },
+    { "ap_pass",  "Access-point password",        true  },
+    { "sta_ssid", "Home WiFi name (station SSID)", false },
+    { "sta_pass", "Home WiFi password",           true  },
+    { "dav_user", "WebDAV / settings username",   false },
+    { "dav_pass", "WebDAV / settings password",   true  },
+};
+#define N_SETTINGS_FIELDS (sizeof(SETTINGS_FIELDS) / sizeof(SETTINGS_FIELDS[0]))
+
+static void reboot_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(1200));   /* let the HTTP response flush first */
+    esp_restart();
+}
+
+static esp_err_t ui_settings_get(httpd_req_t *req)
+{
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
+    sb_t sb = {0};
+    sb_puts(&sb, BROWSE_HEAD);
+    sb_puts(&sb,
+        "<h1>Settings</h1>"
+        "<form method=post action=\"/settings\" "
+        "style=\"padding:.5rem;display:flex;flex-direction:column;gap:.6rem\">");
+
+    for (size_t i = 0; i < N_SETTINGS_FIELDS; i++) {
+        const field_t *fp = &SETTINGS_FIELDS[i];
+        char val[96];
+        config_get_str(fp->key, NULL, val, sizeof(val));
+        sb_puts(&sb, "<label style=\"color:#8a8;font-size:.85rem\">");
+        sb_esc(&sb, fp->label);
+        sb_puts(&sb, "<br><input name=\"");
+        sb_puts(&sb, fp->key);
+        sb_puts(&sb, "\" value=\"");
+        sb_esc(&sb, val);
+        sb_puts(&sb, fp->secret ? "\" type=text autocomplete=off" : "\" type=text");
+        sb_puts(&sb, " style=\"width:100%;box-sizing:border-box;padding:.5rem;"
+                     "background:#1a1a1a;color:#eee;border:1px solid #333;border-radius:4px\">"
+                     "</label>");
+    }
+
+    {
+        char chan[8];
+        snprintf(chan, sizeof(chan), "%d", config_get_int("ap_chan", CONFIG_AP_CHANNEL));
+        sb_puts(&sb, "<label style=\"color:#8a8;font-size:.85rem\">AP channel (1-13)"
+                     "<br><input name=\"ap_chan\" value=\"");
+        sb_esc(&sb, chan);
+        sb_puts(&sb, "\" type=text style=\"width:100%;box-sizing:border-box;padding:.5rem;"
+                     "background:#1a1a1a;color:#eee;border:1px solid #333;border-radius:4px\">"
+                     "</label>");
+    }
+
+    sb_puts(&sb,
+        "<button type=submit style=\"padding:.7rem;background:#1d2a33;color:#7cf;"
+        "border:1px solid #345;border-radius:4px;font-size:1rem\">Save &amp; reboot</button>"
+        "</form>"
+        "<p>Leaving the WebDAV password blank disables the login. "
+        "Saving reboots the device to apply WiFi changes.</p>"
+        "<a class=up href=\"/\">\xE2\xAC\x85 back</a>");   /* ⬅ */
+
+    if (sb.err) {
+        free(sb.buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    esp_err_t r = httpd_resp_send(req, sb.buf, sb.len);
+    free(sb.buf);
+    return r;
+}
+
+static esp_err_t ui_settings_post(httpd_req_t *req)
+{
+    if (!auth_ok(req)) {
+        return auth_challenge(req);
+    }
+    int total = req->content_len;
+    if (total <= 0 || total > 2048) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
+        return ESP_FAIL;
+    }
+    char *body = malloc(total + 1);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    int got = 0;
+    while (got < total) {
+        int r = httpd_req_recv(req, body + got, total - got);
+        if (r <= 0) {
+            free(body);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv");
+            return ESP_FAIL;
+        }
+        got += r;
+    }
+    body[total] = '\0';
+
+    /* Persist each known text field (leaving one absent from the form keeps its value). */
+    for (size_t i = 0; i < N_SETTINGS_FIELDS; i++) {
+        const char *key = SETTINGS_FIELDS[i].key;
+        char enc[256], dec[128];
+        if (httpd_query_key_value(body, key, enc, sizeof(enc)) == ESP_OK &&
+            content_dir_url_decode(enc, dec, sizeof(dec))) {
+            config_set_str(key, dec);
+        }
+    }
+    {
+        char enc[16], dec[16];
+        if (httpd_query_key_value(body, "ap_chan", enc, sizeof(enc)) == ESP_OK &&
+            content_dir_url_decode(enc, dec, sizeof(dec))) {
+            int ch = atoi(dec);
+            if (ch >= 1 && ch <= 13) {
+                config_set_int("ap_chan", ch);
+            }
+        }
+    }
+    free(body);
+
+    ESP_LOGI(TAG, "settings saved — rebooting");
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_send(req,
+        "<!doctype html><meta charset=utf-8>"
+        "<meta http-equiv=refresh content=\"6; url=/\">"
+        "<body style=\"font-family:system-ui;background:#111;color:#eee;padding:2rem\">"
+        "Saved. Rebooting to apply\xE2\x80\xA6 this page returns to the browser in a few seconds. "
+        "If the WiFi name or password changed, reconnect to the new network.",
+        HTTPD_RESP_USE_STRLEN);
+
+    xTaskCreate(reboot_task, "reboot", 2048, NULL, 5, NULL);
+    return ESP_OK;
+}
+
 /* ---------------------------------------------------------- register */
 
 esp_err_t webui_register(httpd_handle_t server)
 {
     const httpd_uri_t routes[] = {
-        { .uri = "/",       .method = HTTP_GET, .handler = ui_root },
-        { .uri = "/browse", .method = HTTP_GET, .handler = ui_browse },
-        { .uri = "/play",   .method = HTTP_GET, .handler = ui_play },
+        { .uri = "/",         .method = HTTP_GET,  .handler = ui_root },
+        { .uri = "/browse",   .method = HTTP_GET,  .handler = ui_browse },
+        { .uri = "/play",     .method = HTTP_GET,  .handler = ui_play },
+        { .uri = "/settings", .method = HTTP_GET,  .handler = ui_settings_get },
+        { .uri = "/settings", .method = HTTP_POST, .handler = ui_settings_post },
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         esp_err_t err = httpd_register_uri_handler(server, &routes[i]);

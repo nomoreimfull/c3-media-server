@@ -12,6 +12,8 @@ idf_component_register(
         "dlna_didl.c"
         "webdav.c"
         "webui.c"
+        "config.c"
+        "auth.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
@@ -25,6 +27,7 @@ idf_component_register(
         driver
         mdns
         lwip
+        mbedtls
 )
 
 # Path-building snprintf() calls intentionally accept truncation for pathologically

@@ -1,4 +1,5 @@
 #include "wifi.h"
+#include "config.h"
 
 #include <string.h>
 
@@ -8,6 +9,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "wifi";
 
@@ -54,21 +56,24 @@ static void event_handler(void *arg, esp_event_base_t base,
 /* Try to join the configured home network. Returns true on success. */
 static bool try_station(void)
 {
-    if (strlen(CONFIG_STA_SSID) == 0) {
+    char ssid[33], pass[65];
+    config_get_str("sta_ssid", CONFIG_STA_SSID, ssid, sizeof(ssid));
+    config_get_str("sta_pass", CONFIG_STA_PASS, pass, sizeof(pass));
+    if (strlen(ssid) == 0) {
         return false;   /* no home network configured */
     }
 
     s_sta_netif = esp_netif_create_default_wifi_sta();
 
     wifi_config_t sta = {0};
-    strlcpy((char *)sta.sta.ssid, CONFIG_STA_SSID, sizeof(sta.sta.ssid));
-    strlcpy((char *)sta.sta.password, CONFIG_STA_PASS, sizeof(sta.sta.password));
+    strlcpy((char *)sta.sta.ssid, ssid, sizeof(sta.sta.ssid));
+    strlcpy((char *)sta.sta.password, pass, sizeof(sta.sta.password));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "trying home network '%s' ...", CONFIG_STA_SSID);
+    ESP_LOGI(TAG, "trying home network '%s' ...", ssid);
     EventBits_t bits = xEventGroupWaitBits(s_events, STA_GOT_IP_BIT | STA_FAIL_BIT,
                                            pdFALSE, pdFALSE, pdMS_TO_TICKS(15000));
     if (bits & STA_GOT_IP_BIT) {
@@ -86,19 +91,24 @@ static bool try_station(void)
 
 static void start_ap(void)
 {
+    char ssid[33], pass[65];
+    config_get_str("ap_ssid", CONFIG_AP_SSID, ssid, sizeof(ssid));
+    config_get_str("ap_pass", CONFIG_AP_PASS, pass, sizeof(pass));
+    int channel = config_get_int("ap_chan", CONFIG_AP_CHANNEL);
+
     s_ap_netif = esp_netif_create_default_wifi_ap();
 
     wifi_config_t ap = {0};
-    strlcpy((char *)ap.ap.ssid, CONFIG_AP_SSID, sizeof(ap.ap.ssid));
-    ap.ap.ssid_len = strlen(CONFIG_AP_SSID);
-    ap.ap.channel = CONFIG_AP_CHANNEL;
+    strlcpy((char *)ap.ap.ssid, ssid, sizeof(ap.ap.ssid));
+    ap.ap.ssid_len = strlen(ssid);
+    ap.ap.channel = channel;
     ap.ap.max_connection = CONFIG_AP_MAX_CONN;
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
     ap.ap.pmf_cfg.required = false;
-    if (strlen(CONFIG_AP_PASS) == 0) {
+    if (strlen(pass) == 0) {
         ap.ap.authmode = WIFI_AUTH_OPEN;
     } else {
-        strlcpy((char *)ap.ap.password, CONFIG_AP_PASS, sizeof(ap.ap.password));
+        strlcpy((char *)ap.ap.password, pass, sizeof(ap.ap.password));
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
@@ -108,7 +118,7 @@ static void start_ap(void)
     char ip[16] = {0};
     wifi_get_ip(ip, sizeof(ip));
     ESP_LOGI(TAG, "SoftAP up: SSID='%s' channel=%d ip=%s auth=%s",
-             CONFIG_AP_SSID, CONFIG_AP_CHANNEL, ip,
+             ssid, channel, ip,
              (ap.ap.authmode == WIFI_AUTH_OPEN) ? "OPEN" : "WPA2");
 }
 
@@ -127,7 +137,7 @@ esp_err_t wifi_start(void)
     if (try_station()) {
         char ip[16] = {0};
         wifi_get_ip(ip, sizeof(ip));
-        ESP_LOGI(TAG, "joined '%s' as station, ip=%s", CONFIG_STA_SSID, ip);
+        ESP_LOGI(TAG, "joined station network, ip=%s", ip);
     } else {
         start_ap();
     }
