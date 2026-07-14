@@ -6,6 +6,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "lwip/inet.h"
 
 static const char *TAG = "wifi_ap";
 
@@ -54,6 +55,20 @@ esp_err_t wifi_ap_start(void)
 
     /* Keep the radio fully awake — this is a streaming server, not a sensor. */
     esp_wifi_set_ps(WIFI_PS_NONE);
+
+    /* Advertise ourselves as the DNS server so the captive keep-alive (DNS hijack
+     * + connectivity-probe responder) can stop clients dropping the no-internet AP. */
+    {
+        esp_netif_dns_info_t dns = {0};
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        dns.ip.u_addr.ip4.addr = ipaddr_addr("192.168.4.1");
+        esp_netif_dhcps_stop(s_ap_netif);
+        esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+        uint8_t offer = 0x02;   /* OFFER_DNS */
+        esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
+                               ESP_NETIF_DOMAIN_NAME_SERVER, &offer, sizeof(offer));
+        esp_netif_dhcps_start(s_ap_netif);
+    }
 
     char ip[16] = {0};
     wifi_ap_get_ip(ip, sizeof(ip));

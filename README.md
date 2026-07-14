@@ -79,9 +79,20 @@ immediately (the folder's index is refreshed on write).
 
 To avoid re-scanning the SD on every browse, the first listing of a folder writes a small
 `index.xml` under **`/sdcard/.info/`** (mirroring the tree) and later listings read that.
-It's rebuilt automatically when you change a folder over WebDAV. If you edit the card
-**externally** (pull it and change files on a computer), delete `/sdcard/.info` to force a
-fresh index. The `.info` folder is hidden from both DLNA and WebDAV listings.
+It's rebuilt automatically when you change a folder over WebDAV, and the whole `.info` tree is
+**cleared on every boot** so a card edited externally (pulled and changed on a computer)
+re-indexes cleanly after a power-cycle. The `.info` folder, `System Volume Information`, and
+`$RECYCLE.BIN` are hidden from listings.
+
+## Staying connected (captive keep-alive)
+
+Because the AP has no internet, phones/laptops tend to drop it after ~a minute ("no internet,
+switching to mobile data"). To counter that, the box advertises itself as the DNS server,
+resolves every lookup to itself, and answers HTTP connectivity probes with a success response
+so clients treat the network as online and stay associated. This does **not** defeat
+cert-pinned HTTPS checks (which is why Roku still won't stay), but it keeps ordinary clients
+connected. If a phone still nags, tap **"stay connected / always connect"** on the
+no-internet prompt.
 
 ## Use it from Roku
 

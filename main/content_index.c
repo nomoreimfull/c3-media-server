@@ -16,6 +16,20 @@ static const char *TAG = "cidx";
 
 #define INFO_DIR ".info"
 
+/* Hide dotfiles, the .info mirror, and common filesystem junk from listings. */
+static bool skip_name(const char *n)
+{
+    if (n[0] == '.') {
+        return true;
+    }
+    if (!strcasecmp(n, "System Volume Information") ||
+        !strcasecmp(n, "$RECYCLE.BIN") ||
+        !strcasecmp(n, "found.000")) {
+        return true;
+    }
+    return false;
+}
+
 /* ------------------------------------------------------------------ paths */
 
 /* /sdcard/.info[/<rel_dir>] — the mirror directory holding rel_dir's index. */
@@ -106,7 +120,7 @@ static int count_children(const char *full_dir)
     int n = 0;
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') {
+        if (skip_name(de->d_name)) {
             continue;
         }
         bool is_dir = (de->d_type == DT_DIR);
@@ -146,8 +160,8 @@ static bool scan_dir(const char *rel_dir, scan_entry_t **out_arr, int *out_n)
     }
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') {
-            continue;   /* hides dotfiles and the .info mirror */
+        if (skip_name(de->d_name)) {
+            continue;   /* dotfiles, .info mirror, and FS junk */
         }
         char child_full[600];
         snprintf(child_full, sizeof(child_full), "%s/%s", full, de->d_name);
@@ -394,6 +408,38 @@ int content_index_count(const char *rel_dir)
         return -1;
     }
     return total;
+}
+
+static void rm_tree(const char *full)
+{
+    DIR *d = opendir(full);
+    if (!d) {
+        return;
+    }
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
+            continue;
+        }
+        char child[600];
+        snprintf(child, sizeof(child), "%s/%s", full, de->d_name);
+        struct stat st;
+        if (stat(child, &st) == 0 && S_ISDIR(st.st_mode)) {
+            rm_tree(child);
+        } else {
+            unlink(child);
+        }
+    }
+    closedir(d);
+    rmdir(full);
+}
+
+void content_index_reset(void)
+{
+    char info[512];
+    snprintf(info, sizeof(info), "%s/%s", SD_MOUNT_POINT, INFO_DIR);
+    rm_tree(info);
+    ESP_LOGI(TAG, "cleared %s — index rebuilds on demand", info);
 }
 
 void content_index_invalidate(const char *rel_dir)

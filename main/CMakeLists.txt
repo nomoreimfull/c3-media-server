@@ -7,6 +7,7 @@ idf_component_register(
         "media_stream.c"
         "content_dir.c"
         "content_index.c"
+        "captive.c"
         "dlna_ssdp.c"
         "dlna_upnp.c"
         "dlna_didl.c"

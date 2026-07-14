@@ -12,6 +12,8 @@
 #include "sdcard.h"
 #include "http_server.h"
 #include "dlna_ssdp.h"
+#include "content_index.h"
+#include "captive.h"
 
 static const char *TAG = "app";
 
@@ -47,6 +49,9 @@ void app_main(void)
      * failure is visible, just with nothing to browse. */
     if (sdcard_mount() != ESP_OK) {
         ESP_LOGE(TAG, "SD card not mounted — browsing will be empty. Check wiring/format.");
+    } else {
+        /* Clear the on-SD index so a card edited externally re-indexes cleanly. */
+        content_index_reset();
     }
 
     start_mdns();
@@ -57,8 +62,11 @@ void app_main(void)
         return;
     }
 
-    /* SSDP discovery so Roku lists the server. */
+    /* SSDP discovery so control points list the server. */
     ESP_ERROR_CHECK(dlna_ssdp_start());
+
+    /* Captive keep-alive so clients don't drop the no-internet AP. */
+    ESP_ERROR_CHECK(captive_dns_start());
 
     ESP_LOGI(TAG, "C3 media server ready: '%s'", CONFIG_DLNA_FRIENDLY_NAME);
 }

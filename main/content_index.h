@@ -38,6 +38,10 @@ bool content_index_iterate(const char *rel_dir, int start, int count,
 /* Total child count of rel_dir (builds/reads the index). -1 if not a directory. */
 int content_index_count(const char *rel_dir);
 
+/* Delete the whole /sdcard/.info index tree. Call once at boot so a card that was
+ * edited externally (files added/removed on a computer) re-indexes cleanly. */
+void content_index_reset(void);
+
 /* Drop the cached index for rel_dir and its parent (whose childCount changed).
  * Call after a WebDAV mutation so the next listing rebuilds. */
 void content_index_invalidate(const char *rel_dir);
