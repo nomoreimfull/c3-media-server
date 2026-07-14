@@ -11,6 +11,7 @@ idf_component_register(
         "dlna_upnp.c"
         "dlna_didl.c"
         "webdav.c"
+        "webui.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash

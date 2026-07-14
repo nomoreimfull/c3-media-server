@@ -2,6 +2,7 @@
 #include "media_stream.h"
 #include "dlna_upnp.h"
 #include "webdav.h"
+#include "webui.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -13,7 +14,7 @@ httpd_handle_t http_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = CONFIG_HTTP_PORT;
     config.lru_purge_enable = true;       /* reclaim the oldest socket under pressure */
-    config.max_uri_handlers = 20;         /* /media + 5 UPnP + 8 WebDAV + headroom */
+    config.max_uri_handlers = 24;         /* /media /tx + 5 UPnP + 8 WebDAV + 3 web UI */
     config.stack_size = 8192;
     config.recv_wait_timeout = 15;
     config.send_wait_timeout = 30;   /* survive the player pausing after it buffers */
@@ -46,6 +47,10 @@ httpd_handle_t http_server_start(void)
 
     if (webdav_register(server) != ESP_OK) {
         ESP_LOGE(TAG, "failed to register WebDAV endpoints");
+    }
+
+    if (webui_register(server) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to register web UI");
     }
 
     ESP_LOGI(TAG, "HTTP server listening on port %d", CONFIG_HTTP_PORT);

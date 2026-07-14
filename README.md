@@ -87,6 +87,21 @@ Two ways to get files onto the card:
 - **Over WiFi via WebDAV** (see below) — add/delete/rename files on the running box, no card
   removal.
 
+## Watch it — the built-in web player (recommended)
+
+Open **`http://<ip>/`** in any phone/laptop browser (`http://192.168.4.1/` in AP mode, or
+`http://c3-media.local/` in station mode). You get a simple file browser: tap a folder to
+navigate, tap a video to play it full-screen in the browser's HTML5 player. Playback starts
+in ~2 seconds.
+
+This is the fastest way to watch, and it deliberately sidesteps DLNA: DLNA control points
+(VLC's UPnP browser, BubbleUPnP, etc.) "extract metadata" by pre-scanning each file before
+playing, which can take minutes over WiFi. The web player just streams via `/media` and
+starts immediately. (DLNA is still available — see below — it's just slower to start.)
+
+Note: browsers play **H.264 MP4/MOV/WebM** natively; **MKV/AVI won't play in-browser** (use
+MP4, or DLNA/VLC for those). Keep bitrate under your link speed (~2 Mbit/s) for smooth play.
+
 ## WebDAV (manage files over WiFi)
 
 A read-write WebDAV share is exposed at **`http://192.168.4.1/dav`** (no login). Join the C3's
