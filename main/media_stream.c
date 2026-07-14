@@ -17,6 +17,22 @@ static const char *TAG = "media";
  * C3's small heap. Allocated per request (the httpd task serves one at a time). */
 #define SCRATCH_SIZE (32 * 1024)
 
+/* Runtime-selectable transfer method. MEDIA_TX_DEFAULT here means "use the Kconfig
+ * compile-time choice"; GET /tx flips this live (so it applies to DLNA too). */
+static media_tx_t s_runtime_tx = MEDIA_TX_DEFAULT;
+
+static media_tx_t resolve_default(void)
+{
+    if (s_runtime_tx != MEDIA_TX_DEFAULT) {
+        return s_runtime_tx;
+    }
+#if defined(CONFIG_MEDIA_TX_CLEN)
+    return MEDIA_TX_CLEN;
+#else
+    return MEDIA_TX_CHUNKED;
+#endif
+}
+
 /*
  * Parse an HTTP Range header value ("bytes=start-end", "bytes=start-",
  * "bytes=-suffix") against a known file size. On success fills [*start,*end]
@@ -126,6 +142,33 @@ esp_err_t media_stream_handler(httpd_req_t *req)
     }
 
     return media_send_file(req, full_path, rel_path, tx);
+}
+
+esp_err_t media_tx_handler(httpd_req_t *req)
+{
+    size_t qlen = httpd_req_get_url_query_len(req) + 1;
+    if (qlen > 1) {
+        char *q = malloc(qlen);
+        if (q) {
+            char m[16] = "";
+            if (httpd_req_get_url_query_str(req, q, qlen) == ESP_OK &&
+                httpd_query_key_value(q, "m", m, sizeof(m)) == ESP_OK) {
+                if (strcmp(m, "chunked") == 0) {
+                    s_runtime_tx = MEDIA_TX_CHUNKED;
+                } else if (strcmp(m, "clen") == 0) {
+                    s_runtime_tx = MEDIA_TX_CLEN;
+                } else if (strcmp(m, "default") == 0) {
+                    s_runtime_tx = MEDIA_TX_DEFAULT;
+                }
+            }
+            free(q);
+        }
+    }
+    char body[48];
+    int n = snprintf(body, sizeof(body), "media transfer = %s\n",
+                     resolve_default() == MEDIA_TX_CLEN ? "clen" : "chunked");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, body, n);
 }
 
 /* Chunked transfer: keep-alive, no Content-Length. Higher sustained throughput. */
@@ -246,11 +289,7 @@ esp_err_t media_send_file(httpd_req_t *req, const char *full_path,
                           const char *name_for_mime, media_tx_t tx)
 {
     if (tx == MEDIA_TX_DEFAULT) {
-#if defined(CONFIG_MEDIA_TX_CLEN)
-        tx = MEDIA_TX_CLEN;
-#else
-        tx = MEDIA_TX_CHUNKED;
-#endif
+        tx = resolve_default();
     }
 
     struct stat st;

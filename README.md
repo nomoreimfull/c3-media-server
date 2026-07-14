@@ -51,9 +51,17 @@ Key `menuconfig` items under **C3 Media Server Configuration**:
   try 40 MHz on short/clean wiring for more headroom).
 - **DLNA / UPnP**: friendly name, a stable device UUID.
 - **Media streaming**: HTTP transfer method — **Chunked (keep-alive)** (default; usually
-  higher sustained throughput) or **Content-Length (raw socket)** (cleaner seeking). Override
-  per request for A/B testing with `?tx=chunked` or `?tx=clen`, e.g.
-  `http://<ip>/media?path=/movie.mp4&tx=chunked`.
+  higher sustained throughput) or **Content-Length (raw socket)** (cleaner seeking).
+
+### Switching the transfer method (A/B testing)
+
+- **Live, applies to DLNA too:** open **`http://<ip>/tx?m=chunked`** or **`?m=clen`** in a
+  browser to flip the method for all subsequent playback (DLNA browse, WebDAV, direct URL) —
+  no rebuild. `http://<ip>/tx` reports the current method; `?m=default` returns to the
+  menuconfig choice. This is the way to A/B when playing via VLC's UPnP browser, since the
+  DLNA `<res>` URL is fixed and can't take a query flag from the GUI.
+- **Per-request (typed URLs only):** append `?tx=chunked` / `?tx=clen`, e.g.
+  `http://<ip>/media?path=/movie.mp4&tx=clen`.
 
 ## Two WiFi modes (station or access point)
 

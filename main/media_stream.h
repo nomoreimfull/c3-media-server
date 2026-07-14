@@ -23,6 +23,13 @@ typedef enum {
 esp_err_t media_stream_handler(httpd_req_t *req);
 
 /*
+ * URI handler for `GET /tx` — the live transfer-method toggle. `?m=chunked|clen|default`
+ * sets the runtime default (applies to DLNA + WebDAV + direct URLs); always replies with
+ * the current effective method as plain text. Lets you A/B without rebuilding.
+ */
+esp_err_t media_tx_handler(httpd_req_t *req);
+
+/*
  * Stream a file from its absolute VFS path with HTTP Range support, using the
  * given transfer method (MEDIA_TX_DEFAULT = Kconfig default). Content-Type comes
  * from name_for_mime's extension. Shared by /media and WebDAV GET; sends its own

@@ -33,6 +33,13 @@ httpd_handle_t http_server_start(void)
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &media));
 
+    const httpd_uri_t tx = {
+        .uri = "/tx",
+        .method = HTTP_GET,
+        .handler = media_tx_handler,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &tx));
+
     if (dlna_upnp_register(server) != ESP_OK) {
         ESP_LOGE(TAG, "failed to register UPnP endpoints");
     }
