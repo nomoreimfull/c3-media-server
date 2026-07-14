@@ -84,15 +84,18 @@ It's rebuilt automatically when you change a folder over WebDAV, and the whole `
 re-indexes cleanly after a power-cycle. The `.info` folder, `System Volume Information`, and
 `$RECYCLE.BIN` are hidden from listings.
 
-## Staying connected (captive keep-alive)
+## Staying connected (no internet on the AP)
 
-Because the AP has no internet, phones/laptops tend to drop it after ~a minute ("no internet,
-switching to mobile data"). To counter that, the box advertises itself as the DNS server,
-resolves every lookup to itself, and answers HTTP connectivity probes with a success response
-so clients treat the network as online and stay associated. This does **not** defeat
-cert-pinned HTTPS checks (which is why Roku still won't stay), but it keeps ordinary clients
-connected. If a phone still nags, tap **"stay connected / always connect"** on the
-no-internet prompt.
+Because the AP has no internet, phones drop it after ~a minute and fall back to cellular —
+which interrupts loading/streaming. There's no reliable firmware trick for this (modern
+devices validate over cert-pinned HTTPS, which can't be faked — the same wall that blocks
+Roku). The dependable fix is on the client: **remove its cellular fallback while streaming.**
+
+- **Phone (best):** turn on **Airplane mode, then re-enable WiFi** and join `c3-media`. With
+  no cellular to switch to, the phone stays on the no-internet AP. (Or just toggle **Mobile
+  data off**.)
+- Or tap **"stay connected / always connect"** on the "Wi-Fi has no internet access" prompt.
+- Laptops generally stay connected without any of this.
 
 ## Use it from Roku
 

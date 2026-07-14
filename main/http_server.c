@@ -2,7 +2,6 @@
 #include "media_stream.h"
 #include "dlna_upnp.h"
 #include "webdav.h"
-#include "captive.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -41,9 +40,6 @@ httpd_handle_t http_server_start(void)
     if (webdav_register(server) != ESP_OK) {
         ESP_LOGE(TAG, "failed to register WebDAV endpoints");
     }
-
-    /* Connectivity-probe responder for the captive keep-alive (unmatched URLs). */
-    captive_register_http(server);
 
     ESP_LOGI(TAG, "HTTP server listening on port %d", CONFIG_HTTP_PORT);
     return server;
