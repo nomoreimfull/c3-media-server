@@ -1,7 +1,7 @@
 #include "dlna_upnp.h"
 #include "dlna_didl.h"
 #include "content_dir.h"
-#include "wifi_ap.h"
+#include "wifi.h"
 #include "templates.h"
 #include "sdkconfig.h"
 
@@ -328,7 +328,7 @@ static esp_err_t cm_control_handler(httpd_req_t *req)
 esp_err_t dlna_upnp_register(httpd_handle_t server)
 {
     char ip[16] = "192.168.4.1";
-    wifi_ap_get_ip(ip, sizeof(ip));
+    wifi_get_ip(ip, sizeof(ip));
     snprintf(s_server_base, sizeof(s_server_base), "http://%s:%d", ip, CONFIG_HTTP_PORT);
     snprintf(s_location, sizeof(s_location), "%s/desc.xml", s_server_base);
     ESP_LOGI(TAG, "server base = %s", s_server_base);

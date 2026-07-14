@@ -1,9 +1,21 @@
 menu "C3 Media Server Configuration"
 
-    menu "WiFi Access Point"
+    menu "WiFi"
+
+        config STA_SSID
+            string "Home network SSID (station mode)"
+            default ""
+            help
+                If set, the box tries to join this existing WiFi network at boot
+                (station mode) — it then lives on your LAN with internet, so
+                clients don't drop it. Leave EMPTY to always host its own AP.
+
+        config STA_PASS
+            string "Home network password"
+            default ""
 
         config AP_SSID
-            string "SoftAP SSID"
+            string "SoftAP SSID (fallback)"
             default "c3-media"
             help
                 Name of the WiFi network the ESP32-C3 hosts. The Roku (and any

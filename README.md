@@ -45,10 +45,26 @@ idf.py -p <PORT> flash monitor
 ```
 
 Key `menuconfig` items under **C3 Media Server Configuration**:
-- **WiFi Access Point**: `AP_SSID`, `AP_PASS` (≥8 chars, or blank for open), channel.
+- **WiFi**: `STA_SSID`/`STA_PASS` (your home network — optional), and `AP_SSID`/`AP_PASS`
+  (the fallback access point), channel.
 - **SD Card (SPI)**: the four GPIOs and the SPI clock (`SD_SPI_FREQ_KHZ`, default 20 MHz —
   try 40 MHz on short/clean wiring for more headroom).
-- **DLNA / UPnP**: friendly name shown to Roku, a stable device UUID.
+- **DLNA / UPnP**: friendly name, a stable device UUID.
+
+## Two WiFi modes (station or access point)
+
+At boot the box picks one:
+
+- **Station** — if `STA_SSID` is set, it tries to join that home network (~15 s). On success
+  it lives on your LAN and the router gives it an IP; find it at **`c3-media.local`** or its
+  DHCP address. Everything (streaming, DLNA discovery, WebDAV) works across the LAN, and
+  because the network has real internet, **clients stay connected** (no captive-drop). This is
+  the mode to use at home.
+- **Access point** — if `STA_SSID` is blank, or the home network isn't reachable, it hosts its
+  own WiFi (`AP_SSID`, default `192.168.4.1`) for fully standalone use. On this no-internet AP,
+  phones may drop off after a minute — see "Staying connected" below.
+
+A station that later loses the network just auto-reconnects; the mode is chosen once per boot.
 
 ## Load media
 
@@ -132,8 +148,8 @@ Since the device can't transcode, match your source files to this budget ahead o
 
 ```
 main/
-  app_main.c        boot: nvs -> wifi_ap -> sdcard -> mdns -> http -> ssdp
-  wifi_ap.c         SoftAP + DHCP
+  app_main.c        boot: nvs -> wifi -> sdcard -> mdns -> http -> ssdp
+  wifi.c            station-with-AP-fallback bring-up
   sdcard.c          SDSPI FATFS mount
   http_server.c     shared esp_http_server + route registration
   media_stream.c    GET /media with HTTP Range (media_send_file shared with WebDAV)

@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         "app_main.c"
-        "wifi_ap.c"
+        "wifi.c"
         "sdcard.c"
         "http_server.c"
         "media_stream.c"

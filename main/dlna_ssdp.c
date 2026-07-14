@@ -1,6 +1,6 @@
 #include "dlna_ssdp.h"
 #include "dlna_upnp.h"
-#include "wifi_ap.h"
+#include "wifi.h"
 #include "sdkconfig.h"
 
 #include <string.h>
@@ -151,7 +151,7 @@ static void ssdp_task(void *arg)
     (void)arg;
 
     char ip[16] = "192.168.4.1";
-    wifi_ap_get_ip(ip, sizeof(ip));
+    wifi_get_ip(ip, sizeof(ip));
 
     s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s_sock < 0) {
@@ -175,7 +175,7 @@ static void ssdp_task(void *arg)
         return;
     }
 
-    /* Join the SSDP multicast group on the AP interface. */
+    /* Join the SSDP multicast group on the active interface (STA or AP). */
     struct ip_mreq mreq = {0};
     mreq.imr_multiaddr.s_addr = inet_addr(SSDP_MCAST_ADDR);
     mreq.imr_interface.s_addr = inet_addr(ip);
@@ -183,7 +183,7 @@ static void ssdp_task(void *arg)
         ESP_LOGW(TAG, "IP_ADD_MEMBERSHIP failed (continuing)");
     }
 
-    /* Send outgoing multicast out the AP interface, small TTL. */
+    /* Send outgoing multicast out the active interface, small TTL. */
     struct in_addr if_addr = { .s_addr = inet_addr(ip) };
     setsockopt(s_sock, IPPROTO_IP, IP_MULTICAST_IF, &if_addr, sizeof(if_addr));
     uint8_t ttl = 4;

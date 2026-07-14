@@ -10,7 +10,7 @@
 #include "mdns.h"
 #include "sdkconfig.h"
 
-#include "wifi_ap.h"
+#include "wifi.h"
 #include "sdcard.h"
 #include "http_server.h"
 #include "dlna_ssdp.h"
@@ -49,8 +49,9 @@ void app_main(void)
     esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
 
-    /* Bring up the SoftAP first so the HTTP/SSDP layers have an IP to bind to. */
-    ESP_ERROR_CHECK(wifi_ap_start());
+    /* Bring up WiFi (station if a home network is configured, else SoftAP) first
+     * so the HTTP/SSDP layers have an IP to bind to. */
+    ESP_ERROR_CHECK(wifi_start());
 
     /* Mount the SD card. Non-fatal: the server still answers discovery so the
      * failure is visible, just with nothing to browse. */
