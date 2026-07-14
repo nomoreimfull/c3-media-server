@@ -41,6 +41,12 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    /* These two tags warn on every normal streaming abort — a media player that
+     * buffered enough and stopped reading trips "send error 11/104" +
+     * "uri handler execution failed". Benign; quiet the noise. */
+    esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
+
     /* Bring up the SoftAP first so the HTTP/SSDP layers have an IP to bind to. */
     ESP_ERROR_CHECK(wifi_ap_start());
 
