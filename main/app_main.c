@@ -5,6 +5,8 @@
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "mdns.h"
 #include "sdkconfig.h"
 
@@ -71,4 +73,8 @@ void app_main(void)
     ESP_ERROR_CHECK(dlna_ssdp_start());
 
     ESP_LOGI(TAG, "C3 media server ready: '%s'", CONFIG_DLNA_FRIENDLY_NAME);
+    ESP_LOGI(TAG, "free heap: %u bytes (min ever: %u, largest block: %u)",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 }
