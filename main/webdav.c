@@ -443,7 +443,7 @@ static esp_err_t dav_get(httpd_req_t *req)
         return ESP_FAIL;
     }
     if (!S_ISDIR(st.st_mode)) {
-        return media_send_file(req, full, rel);
+        return media_send_file(req, full, rel, MEDIA_TX_DEFAULT);
     }
     /* GET on a folder → a minimal HTML index (handy from a browser). */
     db_t db = {0};

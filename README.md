@@ -50,6 +50,10 @@ Key `menuconfig` items under **C3 Media Server Configuration**:
 - **SD Card (SPI)**: the four GPIOs and the SPI clock (`SD_SPI_FREQ_KHZ`, default 20 MHz —
   try 40 MHz on short/clean wiring for more headroom).
 - **DLNA / UPnP**: friendly name, a stable device UUID.
+- **Media streaming**: HTTP transfer method — **Chunked (keep-alive)** (default; usually
+  higher sustained throughput) or **Content-Length (raw socket)** (cleaner seeking). Override
+  per request for A/B testing with `?tx=chunked` or `?tx=clen`, e.g.
+  `http://<ip>/media?path=/movie.mp4&tx=chunked`.
 
 ## Two WiFi modes (station or access point)
 

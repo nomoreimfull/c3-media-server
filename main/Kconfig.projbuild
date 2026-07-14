@@ -88,4 +88,25 @@ menu "C3 Media Server Configuration"
 
     endmenu
 
+    menu "Media streaming"
+
+        choice MEDIA_TX
+            prompt "HTTP transfer method"
+            default MEDIA_TX_CHUNKED
+            help
+                How /media sends responses. Chunked keeps the connection alive
+                and tends to sustain higher throughput; Content-Length gives
+                cleaner seeking but closes the connection each request. Override
+                per request with ?tx=chunked or ?tx=clen.
+
+            config MEDIA_TX_CHUNKED
+                bool "Chunked (keep-alive)"
+
+            config MEDIA_TX_CLEN
+                bool "Content-Length (raw socket)"
+
+        endchoice
+
+    endmenu
+
 endmenu
