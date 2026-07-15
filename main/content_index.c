@@ -410,6 +410,71 @@ int content_index_count(const char *rel_dir)
     return total;
 }
 
+bool content_index_list_all(const char *rel_dir, content_index_cb cb, void *ctx,
+                            int *number_returned, int *total_matches)
+{
+    *number_returned = 0;
+    *total_matches = 0;
+
+    char full[512];
+    if (!content_dir_full_path(rel_dir, full, sizeof(full))) {
+        return false;
+    }
+    DIR *d = opendir(full);
+    if (!d) {
+        return false;
+    }
+    size_t cap = 16;
+    int n = 0;
+    scan_entry_t *arr = malloc(cap * sizeof(scan_entry_t));
+    if (!arr) {
+        closedir(d);
+        return false;
+    }
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (skip_name(de->d_name)) {
+            continue;   /* dotfiles (incl. .part temps), .info, FS junk */
+        }
+        char child_full[600];
+        snprintf(child_full, sizeof(child_full), "%s/%s", full, de->d_name);
+        struct stat st;
+        if (stat(child_full, &st) != 0) {
+            continue;
+        }
+        if ((size_t)n == cap) {
+            cap *= 2;
+            scan_entry_t *ne = realloc(arr, cap * sizeof(scan_entry_t));
+            if (!ne) {
+                break;
+            }
+            arr = ne;
+        }
+        bool is_dir = S_ISDIR(st.st_mode);
+        arr[n].name = strdup(de->d_name);
+        arr[n].is_dir = is_dir;
+        arr[n].size = is_dir ? -1 : (long)st.st_size;
+        arr[n].child_count = -1;   /* not needed by file-manager listings */
+        n++;
+    }
+    closedir(d);
+    qsort(arr, n, sizeof(scan_entry_t), scan_cmp);
+
+    for (int i = 0; i < n; i++) {
+        content_index_entry_t e = {
+            .name = arr[i].name, .is_dir = arr[i].is_dir,
+            .size = arr[i].size, .child_count = arr[i].child_count,
+        };
+        if (cb) {
+            cb(&e, ctx);
+        }
+    }
+    *number_returned = n;
+    *total_matches = n;
+    free_scan(arr, n);
+    return true;
+}
+
 static void rm_tree(const char *full)
 {
     DIR *d = opendir(full);

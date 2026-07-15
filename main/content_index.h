@@ -10,8 +10,10 @@
  * time we open subdirectories to count children); later listings read the cached
  * XML. Nothing is held in RAM between requests.
  *
- * Both DLNA Browse (dlna_didl.c) and WebDAV PROPFIND (webdav.c) list through this.
- * Relative dirs are SD-rooted, always starting '/', e.g. "/" or "/Movies".
+ * DLNA Browse (dlna_didl.c) lists through this cached, videos-only index. The
+ * file-manager surfaces (WebDAV, the web browser) instead use content_index_list_all
+ * below, which lists every file live. Relative dirs are SD-rooted, always starting
+ * '/', e.g. "/" or "/Movies".
  */
 
 typedef struct {
@@ -37,6 +39,17 @@ bool content_index_iterate(const char *rel_dir, int start, int count,
 
 /* Total child count of rel_dir (builds/reads the index). -1 if not a directory. */
 int content_index_count(const char *rel_dir);
+
+/*
+ * Live listing of EVERY non-hidden child of rel_dir (not just videos) — folders
+ * first, then files, alpha within each. Unlike content_index_iterate this does not
+ * filter to playable media and does not read/write the .info cache; it opendir's
+ * fresh each call. For file-manager surfaces (WebDAV, the web browser) that must
+ * show images/documents too. cb may be NULL to just count. Returns false only if
+ * rel_dir is not a readable directory. (child_count is left -1 for directories.)
+ */
+bool content_index_list_all(const char *rel_dir, content_index_cb cb, void *ctx,
+                            int *number_returned, int *total_matches);
 
 /* Delete the whole /sdcard/.info index tree. Call once at boot so a card that was
  * edited externally (files added/removed on a computer) re-indexes cleanly. */

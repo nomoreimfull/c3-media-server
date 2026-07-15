@@ -214,10 +214,17 @@ static bool browse_row(const content_index_entry_t *e, void *vctx)
         sb_puts(c->sb, "\">\xF0\x9F\x93\x81 ");   /* 📁 */
         sb_esc(c->sb, e->name);
         sb_puts(c->sb, "/</a>");
-    } else {
+    } else if (content_dir_is_video(e->name)) {
         sb_puts(c->sb, "<a href=\"/play?path=");
         sb_url(c->sb, child);
         sb_puts(c->sb, "\">\xF0\x9F\x8E\xAC ");   /* 🎬 */
+        sb_esc(c->sb, e->name);
+        sb_puts(c->sb, "</a>");
+    } else {
+        /* Non-video file: open/download it straight from the streamer. */
+        sb_puts(c->sb, "<a href=\"/media?path=");
+        sb_url(c->sb, child);
+        sb_puts(c->sb, "\">\xF0\x9F\x93\x84 ");   /* 📄 */
         sb_esc(c->sb, e->name);
         sb_puts(c->sb, "</a>");
     }
@@ -260,7 +267,7 @@ static esp_err_t render_browse(httpd_req_t *req, const char *dir)
 
     browse_ctx_t ctx = { &sb, dir };
     int num = 0, total = 0;
-    content_index_iterate(dir, 0, 0, browse_row, &ctx, &num, &total);
+    content_index_list_all(dir, browse_row, &ctx, &num, &total);
     if (total == 0) {
         sb_puts(&sb, "<p>(empty)</p>");
     }

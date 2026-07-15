@@ -396,7 +396,8 @@ static esp_err_t dav_propfind(httpd_req_t *req)
     if (is_dir && depth[0] != '0') {
         propfind_ctx_t ctx = { &db, rel };
         int num, total;
-        content_index_iterate(rel, 0, 0, propfind_child_cb, &ctx, &num, &total);
+        /* File manager: list ALL files, not just playable media. */
+        content_index_list_all(rel, propfind_child_cb, &ctx, &num, &total);
     }
     db_puts(&db, "</D:multistatus>");
 
@@ -477,7 +478,7 @@ static esp_err_t dav_get(httpd_req_t *req)
     db_puts(&db, "</title><ul>");
     list_ctx_t ctx = { &db, rel };
     int num, total;
-    content_index_iterate(rel, 0, 0, html_child_cb, &ctx, &num, &total);
+    content_index_list_all(rel, html_child_cb, &ctx, &num, &total);
     db_puts(&db, "</ul>");
     if (db.err) {
         free(db.buf);
