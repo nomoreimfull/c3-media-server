@@ -144,8 +144,55 @@ static const char BROWSE_HEAD[] =
     "body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;margin:0;padding:.4rem}"
     "a{color:#7cf;text-decoration:none;display:block;padding:.75rem .5rem;border-bottom:1px solid #2a2a2a}"
     "a:active{background:#1d2a33}"
-    "h1{font-size:.95rem;color:#8a8;padding:.5rem;margin:0;word-break:break-all}"
-    ".up{color:#aaa}p{color:#888;padding:.5rem}</style>";
+    "h1{font-size:.95rem;color:#8a8;padding:.5rem 3rem .5rem .5rem;margin:0;word-break:break-all}"
+    ".up{color:#aaa}p{color:#888;padding:.5rem}"
+    ".tools{position:fixed;top:.5rem;right:.5rem;display:flex;flex-direction:column;gap:.5rem;z-index:20}"
+    ".tools a,.tools button{width:32px;height:32px;padding:0;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center}"
+    ".tools svg{width:32px;height:32px;display:block}"
+    ".st{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.88);color:#fff;padding:1rem 1.25rem;border-radius:8px;z-index:30;max-width:80vw;text-align:center}"
+    "</style>";
+
+/* 32x32 white icons (Feather set) + the browser uploader script. Attributes use
+ * single quotes so the C string needs no escaping. */
+static const char GEAR_SVG[] =
+    "<svg width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='#fff' "
+    "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+    "<circle cx='12' cy='12' r='3'/>"
+    "<path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06"
+    "a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4"
+    "a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82"
+    "a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82"
+    "l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3"
+    "a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83"
+    "l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09"
+    "a1.65 1.65 0 0 0-1.51 1z'/></svg>";
+
+static const char UPLOAD_SVG[] =
+    "<svg width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='#fff' "
+    "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+    "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>"
+    "<polyline points='17 8 12 3 7 8'/>"
+    "<line x1='12' y1='3' x2='12' y2='15'/></svg>";
+
+/* Uploads each picked file to CWD via WebDAV PUT (reuses the safe temp-file path),
+ * one at a time, then reloads so the new files appear. CWD comes from data-cwd. */
+static const char BROWSE_JS[] =
+    "<script>"
+    "var CWD=document.querySelector('.tools').dataset.cwd;"
+    "var fi=document.getElementById('fi'),st=document.getElementById('st');"
+    "function up(fs,i){"
+    "if(i>=fs.length){location.reload();return;}"
+    "var f=fs[i],b=CWD==='/'?'':CWD;"
+    "var u='/dav'+b.split('/').map(encodeURIComponent).join('/')+'/'+encodeURIComponent(f.name);"
+    "var x=new XMLHttpRequest();x.open('PUT',u,true);st.style.display='block';"
+    "x.upload.onprogress=function(e){if(e.lengthComputable){"
+    "st.textContent='Uploading '+f.name+' '+Math.round(100*e.loaded/e.total)+'% ('+(i+1)+'/'+fs.length+')';}};"
+    "x.onload=function(){if(x.status>=200&&x.status<300){up(fs,i+1);}"
+    "else{st.textContent='Failed ('+x.status+'): '+f.name;}};"
+    "x.onerror=function(){st.textContent='Error uploading '+f.name;};"
+    "x.send(f);}"
+    "fi.onchange=function(){if(fi.files.length)up(fi.files,0);};"
+    "</script>";
 
 typedef struct {
     sb_t *sb;
@@ -186,12 +233,22 @@ static esp_err_t render_browse(httpd_req_t *req, const char *dir)
 
     sb_t sb = {0};
     sb_puts(&sb, BROWSE_HEAD);
+
+    /* Fixed top-right toolbar: settings gear, then an upload button below it. The
+     * current dir rides along in data-cwd (HTML-escaped) for the uploader script. */
+    sb_puts(&sb, "<div class=tools data-cwd=\"");
+    sb_esc(&sb, dir);
+    sb_puts(&sb, "\"><a href=\"/settings\" title=\"Settings\">");
+    sb_puts(&sb, GEAR_SVG);
+    sb_puts(&sb, "</a><button type=button onclick=\"fi.click()\" title=\"Upload to this folder\">");
+    sb_puts(&sb, UPLOAD_SVG);
+    sb_puts(&sb, "</button></div>");
+    sb_puts(&sb, "<input id=fi type=file multiple style=\"display:none\">");
+    sb_puts(&sb, "<div id=st class=st></div>");
+
     sb_puts(&sb, "<h1>");
     sb_esc(&sb, dir);
     sb_puts(&sb, "</h1>");
-    if (strcmp(dir, "/") == 0) {
-        sb_puts(&sb, "<a class=up href=\"/settings\">\xE2\x9A\x99 settings</a>");  /* ⚙ */
-    }
 
     if (strcmp(dir, "/") != 0) {
         char up[400];
@@ -207,6 +264,8 @@ static esp_err_t render_browse(httpd_req_t *req, const char *dir)
     if (total == 0) {
         sb_puts(&sb, "<p>(empty)</p>");
     }
+
+    sb_puts(&sb, BROWSE_JS);
 
     if (sb.err) {
         free(sb.buf);
