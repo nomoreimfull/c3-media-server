@@ -160,6 +160,23 @@ advertises) and, for plain HTTP, once Basic auth over HTTP is enabled:
 Set a WebDAV username/password on the settings page first — Windows won't send a blank
 credential over Basic. A phone app (Solid Explorer) or macOS Finder needs none of this.
 
+### If an upload fails / the serial log floods with `media:` reads
+
+Some file managers (notably **CX File Explorer**) generate thumbnails by reading *every* video
+in the folder you have open — head + `moov` tail of each file, on repeat. On this tiny
+single-worker server that burst can starve a simultaneous upload and make the copy fail, while
+the serial log shows a stream of `media: 200 …`/`206 …` lines for the folder's files. It's the
+same "pre-scan everything" behaviour that makes DLNA slow to start.
+
+Fixes:
+- **Turn off thumbnails** in the file manager (CX → *Settings → Display → Show thumbnails* off).
+- Or **copy into a folder with no videos** (make a fresh folder and paste into it) — the app
+  only scans the folder currently open.
+- The firmware also carries a larger socket pool (`max_open_sockets` in `http_server.c`, backed
+  by `CONFIG_LWIP_MAX_SOCKETS`) so the scan burst is less likely to reset a live upload, and
+  logs every WebDAV request (`webdav: PUT/LOCK/PROPFIND …`) so a failed transfer is diagnosable
+  on the serial monitor.
+
 ### File index
 
 To avoid re-scanning the SD on every browse, the first listing of a folder writes a small

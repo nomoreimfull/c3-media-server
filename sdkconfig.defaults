@@ -22,7 +22,12 @@ CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_FATFS_API_ENCODING_UTF_8=y
 
-# --- lwIP: a couple more sockets/PCBs for concurrent stream + SSDP ---
+# --- lwIP: socket pool. httpd claims up to max_open_sockets (13, set in
+#     http_server.c) which must stay <= this minus 3; the rest cover SSDP/mDNS.
+#     Headroom lets a file manager's thumbnail-scan burst not starve a WebDAV
+#     upload. NOTE: sdkconfig.defaults only seeds a FRESH config — on an existing
+#     checkout set it via `idf.py menuconfig` (Component config -> LWIP -> Max
+#     number of open sockets = 16) or delete sdkconfig and rebuild. ---
 CONFIG_LWIP_MAX_SOCKETS=16
 
 # --- lwIP TCP window/buffers: the main streaming-throughput lever. Bigger send

@@ -20,6 +20,14 @@ httpd_handle_t http_server_start(void)
     config.send_wait_timeout = 30;   /* survive the player pausing after it buffers */
     config.uri_match_fn = httpd_uri_match_wildcard;
 
+    /* File managers (CX, etc.) thumbnail/metadata-scan every file in the folder they
+     * open — a burst of parallel connections. A bigger socket pool + backlog keeps
+     * that storm from exhausting the pool and resetting a concurrent WebDAV upload.
+     * max_open_sockets must be <= CONFIG_LWIP_MAX_SOCKETS - 3 (raise LWIP to 16 in
+     * menuconfig: Component config -> LWIP -> Max number of open sockets). */
+    config.max_open_sockets = 13;
+    config.backlog_conn = 8;
+
     httpd_handle_t server = NULL;
     esp_err_t err = httpd_start(&server, &config);
     if (err != ESP_OK) {

@@ -5,8 +5,8 @@
 
 /*
  * Register a read-write WebDAV server at /dav* on the shared httpd, backed by the
- * SD card (SD_MOUNT_POINT). Class-1 (no LOCK) — works with phone WebDAV apps and
- * macOS Finder; Windows write support (LOCK + DAV:2) is a later addition.
+ * SD card (SD_MOUNT_POINT). Class-2 (fake LOCK/UNLOCK) so Windows "Map network
+ * drive" can write, alongside phone WebDAV apps and macOS Finder.
  *
  * Directory listings go through content_index; mutations invalidate the affected
  * folder's index. Call after the SD is mounted and the httpd is started.

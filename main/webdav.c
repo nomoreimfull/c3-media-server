@@ -23,6 +23,17 @@ static const char *TAG = "webdav";
 
 /* ---------------------------------------------------------- small helpers */
 
+/* One-line request trace so the serial log shows the write path (method, target,
+ * body length, and the headers that decide how the body arrives). */
+static void dav_log(httpd_req_t *req, const char *method, const char *rel)
+{
+    char expect[24] = "", te[24] = "";
+    httpd_req_get_hdr_value_str(req, "Expect", expect, sizeof(expect));
+    httpd_req_get_hdr_value_str(req, "Transfer-Encoding", te, sizeof(te));
+    ESP_LOGI(TAG, "%s %s len=%d expect='%s' te='%s'",
+             method, rel, req->content_len, expect, te);
+}
+
 /* Growable string buffer for building the multistatus body. */
 typedef struct {
     char *buf;
@@ -362,6 +373,7 @@ static esp_err_t dav_propfind(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "PROPFIND", rel);
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
     struct stat st;
@@ -447,6 +459,7 @@ static esp_err_t dav_get(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "GET", rel);
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
     struct stat st;
@@ -502,8 +515,32 @@ static esp_err_t dav_put(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "PUT", rel);
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
+
+    /* Some clients (Android okhttp) send "Expect: 100-continue" and wait for an
+     * interim response before streaming the body. esp_http_server doesn't emit it,
+     * so do it by hand or the upload stalls. */
+    char expect[24] = "";
+    httpd_req_get_hdr_value_str(req, "Expect", expect, sizeof(expect));
+    if (strstr(expect, "100-continue") || strstr(expect, "100-Continue")) {
+        const char *cont = "HTTP/1.1 100 Continue\r\n\r\n";
+        httpd_socket_send(req->handle, httpd_req_to_sockfd(req), cont, strlen(cont), 0);
+    }
+
+    /* esp_http_server doesn't de-chunk request bodies: a Transfer-Encoding: chunked
+     * PUT arrives with content_len == 0, and we'd silently write an empty file over
+     * a real one. Refuse it rather than clobber (the log names the client so we can
+     * add real chunked support if something actually needs it). */
+    char te[24] = "";
+    httpd_req_get_hdr_value_str(req, "Transfer-Encoding", te, sizeof(te));
+    if (strstr(te, "chunked")) {
+        ESP_LOGW(TAG, "PUT %s refused: chunked request body unsupported", rel);
+        httpd_resp_set_status(req, "501 Not Implemented");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_FAIL;
+    }
 
     /* Write to a hidden temp file, then rename on full success — so a failed or
      * cancelled upload never leaves a partial file at the real name. */
@@ -524,6 +561,7 @@ static esp_err_t dav_put(httpd_req_t *req)
         return ESP_FAIL;
     }
     int remaining = req->content_len;
+    int got = 0;
     bool ok = true;
     while (remaining > 0) {
         int want = remaining < IO_BUF ? remaining : IO_BUF;
@@ -537,6 +575,7 @@ static esp_err_t dav_put(httpd_req_t *req)
             break;
         }
         remaining -= r;
+        got += r;
     }
     free(buf);
     /* Flush to the card before we decide success — a failed close is a failed write. */
@@ -546,6 +585,7 @@ static esp_err_t dav_put(httpd_req_t *req)
 
     if (!ok) {
         unlink(tmp);   /* no partial file survives */
+        ESP_LOGW(TAG, "PUT %s failed after %d/%d bytes", rel, got, req->content_len);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
         return ESP_FAIL;
     }
@@ -579,6 +619,7 @@ static esp_err_t dav_delete(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "DELETE", rel);
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
     if (rm_recursive(full) != 0) {
@@ -605,6 +646,7 @@ static esp_err_t dav_mkcol(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "MKCOL", rel);
     char full[512];
     content_dir_full_path(rel, full, sizeof(full));
     if (mkdir(full, 0777) != 0) {
@@ -633,6 +675,7 @@ static esp_err_t move_or_copy(httpd_req_t *req, bool is_move)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, is_move ? "MOVE" : "COPY", src);
     char src_full[512], dst_full[512];
     content_dir_full_path(src, src_full, sizeof(src_full));
     content_dir_full_path(dst, dst_full, sizeof(dst_full));
@@ -686,6 +729,7 @@ static esp_err_t dav_lock(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad path");
         return ESP_FAIL;
     }
+    dav_log(req, "LOCK", rel);
     drain_body(req);   /* ignore the requested lock scope/owner */
 
     db_t db = {0};
@@ -718,6 +762,7 @@ static esp_err_t dav_unlock(httpd_req_t *req)
     if (!auth_ok(req)) {
         return auth_challenge(req);
     }
+    ESP_LOGI(TAG, "UNLOCK %s", req->uri);
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, NULL, 0);
 }
